@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="65mm"
+   height="65mm"
+   viewBox="0 0 65 65"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.4 (e7c3feb, 2024-10-09)"
+   sodipodi:docname="Black_Queen.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     inkscape:zoom="0.7180275"
+     inkscape:cx="395.52803"
+     inkscape:cy="561.25984"
+     inkscape:window-width="1850"
+     inkscape:window-height="1011"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1" />
+  <defs
+     id="defs1" />
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <g
+       style="fill-opacity:1;fill-rule:evenodd;stroke:#000000;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       transform="matrix(1.4660203,0,0,1.4660203,-0.7089522,-1.706196)"
+       id="g48">
+      <g
+         style="fill:#000000;stroke:none"
+         id="g42">
+        <circle
+           cx="6"
+           cy="12"
+           r="2.75"
+           id="circle38" />
+        <circle
+           cx="14"
+           cy="9"
+           r="2.75"
+           id="circle39" />
+        <circle
+           cx="22.5"
+           cy="8"
+           r="2.75"
+           id="circle40" />
+        <circle
+           cx="31"
+           cy="9"
+           r="2.75"
+           id="circle41" />
+        <circle
+           cx="39"
+           cy="12"
+           r="2.75"
+           id="circle42" />
+      </g>
+      <path
+         d="m 9,26 c 8.5,-1.5 21,-1.5 27,0 L 38.5,13.5 31,25 30.7,10.9 25.5,24.5 22.5,10 19.5,24.5 14.3,10.9 14,25 6.5,13.5 Z"
+         style="stroke:#000000;stroke-linecap:butt"
+         id="path42" />
+      <path
+         d="m 9,26 c 0,2 1.5,2 2.5,4 1,1.5 1,1 0.5,3.5 -1.5,1 -1.5,2.5 -1.5,2.5 -1.5,1.5 0.5,2.5 0.5,2.5 6.5,1 16.5,1 23,0 0,0 1.5,-1 0,-2.5 0,0 0.5,-1.5 -1,-2.5 -0.5,-2.5 -0.5,-2 0.5,-3.5 1,-2 2.5,-2 2.5,-4 -8.5,-1.5 -18.5,-1.5 -27,0 z"
+         style="stroke-linecap:butt"
+         id="path43" />
+      <path
+         d="m 11,38.5 a 35,35 1 0 0 23,0"
+         style="fill:none;stroke:#000000;stroke-linecap:butt"
+         id="path44" />
+      <path
+         d="m 11,29 a 35,35 1 0 1 23,0"
+         style="fill:none;stroke:#ffffff"
+         id="path45" />
+      <path
+         d="m 12.5,31.5 h 20"
+         style="fill:none;stroke:#ffffff"
+         id="path46" />
+      <path
+         d="m 11.5,34.5 a 35,35 1 0 0 22,0"
+         style="fill:none;stroke:#ffffff"
+         id="path47" />
+      <path
+         d="m 10.5,37.5 a 35,35 1 0 0 24,0"
+         style="fill:none;stroke:#ffffff"
+         id="path48" />
+    </g>
+  </g>
+</svg>
