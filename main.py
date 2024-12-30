@@ -161,8 +161,12 @@ def get_legal_moves(board, index, check_check=True):
         # Add captures
         for offset in [7,9] if color == Piece.Light else [-7,-9]:
             target = index + offset
-            if 0 <= target < 64 and board.squares[target] is not None and (board.squares[target] & color) != color:
-                moves.append(target)
+            if 0 <= target < 64:
+                from_file = index % 8
+                to_file = target % 8
+                if abs(to_file - from_file) == 1:
+                    if board.squares[target] is not None and (board.squares[target] & color) != color:
+                        moves.append(target)
         # En passant
         if board.en_passant_target is not None:
             for offset in [7, 9] if color == Piece.Light else [-7, -9]:
