@@ -13,6 +13,27 @@ pygame.display.set_caption("Chess Board")
 direction_offsets = {8,-8,-1,1,7,-7,9,-9}
 num_squares_to_edge = {}
 
+def show_victory_popup(winner):
+    overlay = pygame.Surface((WIDTH, HEIGHT))
+    overlay.set_alpha(180)
+    overlay.fill((0, 0, 0))
+    screen.blit(overlay, (0, 0))
+
+    font = pygame.font.SysFont("Arial", 72, bold=True)
+    text = font.render(f"{winner} Wins!", True, (255, 215, 0))
+    shadow = font.render(f"{winner} Wins!", True, (0, 0, 0))
+    
+    rect = text.get_rect(center=(WIDTH // 2 + 2, HEIGHT // 2 + 2))
+    screen.blit(shadow, rect)
+    
+    rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+    screen.blit(text, rect)
+    
+    pygame.display.flip()
+    pygame.time.delay(3000)
+    pygame.quit()
+    exit()
+
 def precomputed_move_data():
     for file in range (8):
         for rank in range(8):
@@ -253,6 +274,8 @@ def create_board():
                 pygame.Rect(file*SQUARE_WIDTH, (7-rank)*SQUARE_HEIGHT, SQUARE_WIDTH, SQUARE_HEIGHT)
             )
 
+
+# Modify the main function to check for checkmate after a move is made
 def main():
     precomputed_move_data()
     running = True
@@ -320,6 +343,27 @@ def main():
                             "Dark_Pawn": Piece.Pawn | Piece.Dark,
                         }.get(dragging_info["piece"], None)
                         board.turn = Piece.Dark if board.turn == Piece.Light else Piece.Light
+                        
+                        # Check for checkmate
+                        opponent = board.turn
+                        has_legal_moves = False
+                        for i in range(64):
+                            if board.squares[i] and (board.squares[i] & opponent):
+                                legal_moves = get_legal_moves(board, i)
+                                if legal_moves:
+                                    has_legal_moves = True
+                                    break
+                        if not has_legal_moves:
+                            # Find opponent's king position
+                            king_position = None
+                            for i in range(64):
+                                piece = board.squares[i]
+                                if piece and (piece & opponent) and (piece & ~Piece.Light & ~Piece.Dark) == Piece.King:
+                                    king_position = i
+                                    break
+                            if king_position and is_square_attacked(board, king_position, Piece.Dark if opponent == Piece.Light else Piece.Light):
+                                winner = "White" if opponent == Piece.Dark else "Black"
+                                show_victory_popup(winner)
                     else:
                         board.squares[board.selected] = {
                             "Light_King": Piece.King | Piece.Light,
