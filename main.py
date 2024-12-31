@@ -2,6 +2,8 @@ import pygame
 import os
 import math
 import copy
+import time
+import threading
 
 STARTING_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
 pygame.init()
@@ -367,23 +369,43 @@ def evaluate_board(board):
     }
 
     score = 0
+    pawn_structure = {'Light': 0, 'Dark': 0}
+    doubled_pawns = {'Light': 0, 'Dark': 0}
+    isolated_pawns = {'Light': 0, 'Dark': 0}
+    connected_pawns = {'Light': 0, 'Dark': 0}
+
     for index, piece in enumerate(board.squares):
         if piece:
             piece_type = piece & ~Piece.Light & ~Piece.Dark
             piece_position = piece_square_tables.get(piece_type, [0]*64)[index]
-            if piece & Piece.Light:
-                score += piece_values.get(piece_type, 0) + piece_position
-            elif piece & Piece.Dark:
-                score -= piece_values.get(piece_type, 0) + piece_position
+            color = "Light" if piece & Piece.Light else "Dark"
+            score += (piece_values.get(piece_type, 0) + piece_position) if color == "Light" else -(piece_values.get(piece_type, 0) + piece_position)
+            
+            if piece_type == Piece.Pawn:
+                pawn_structure[color] += 1
+                file = index % 8
+                # Check for doubled pawns
+                for other_index in range(file, 64, 8):
+                    if other_index != index and board.squares[other_index] == piece:
+                        doubled_pawns[color] += 1
+                # Check for isolated pawns
+                if not any(board.squares[i] and (board.squares[i] & Piece.Pawn) and ((i % 8) in [file-1, file+1]) for i in range(64)):
+                    isolated_pawns[color] += 1
+                # Check for connected pawns
+                if any(board.squares[i] and (board.squares[i] & Piece.Pawn) and (i % 8) == file -1 for i in range(64)) or \
+                   any(board.squares[i] and (board.squares[i] & Piece.Pawn) and (i % 8) == file +1 for i in range(64)):
+                    connected_pawns[color] += 1
 
-    # Additional factors
+    # Apply heuristics
+    score += (connected_pawns['Light'] - isolated_pawns['Light'] - doubled_pawns['Light']) * 0.5
+    score -= (connected_pawns['Dark'] - isolated_pawns['Dark'] - doubled_pawns['Dark']) * 0.5
+
     # Mobility
     light_moves = sum(len(get_legal_moves(board, i)) for i in range(64) if board.squares[i] and (board.squares[i] & Piece.Light))
     dark_moves = sum(len(get_legal_moves(board, i)) for i in range(64) if board.squares[i] and (board.squares[i] & Piece.Dark))
     score += (light_moves - dark_moves) * 0.1  # Mobility weight
 
-    # King safety
-    # Penalize exposed kings
+    # King safety remains the same
     light_king = next((i for i, p in enumerate(board.squares) if p == (Piece.King | Piece.Light)), None)
     dark_king = next((i for i, p in enumerate(board.squares) if p == (Piece.King | Piece.Dark)), None)
     if light_king is not None:
@@ -394,6 +416,7 @@ def evaluate_board(board):
         surrounding = get_surrounding_squares(dark_king)
         defended = sum(1 for sq in surrounding if board.squares[sq] and (board.squares[sq] & Piece.Dark))
         score += (8 - defended) * 0.5  # Less defended kings are worse
+
 
     return score
 
@@ -411,18 +434,46 @@ def get_surrounding_squares(index):
                 surrounding.append(new_rank * 8 + new_file)
     return surrounding
 
+
+def quiescence_search(board, alpha, beta, color):
+    stand_pat = color * evaluate_board(board)
+    if stand_pat >= beta:
+        return beta
+    if stand_pat > alpha:
+        alpha = stand_pat
+
+    capture_moves = []
+    for index in range(64):
+        piece = board.squares[index]
+        if piece and (piece & color):
+            legal_moves = get_legal_moves(board, index, check_check=False)
+            for move in legal_moves:
+                if board.squares[move] is not None:
+                    capture_moves.append((index, move))
+    
+    for move in capture_moves:
+        new_board = copy.deepcopy(board)
+        apply_move(new_board, move)
+        score = -quiescence_search(new_board, -beta, -alpha, -color)
+        if score >= beta:
+            return beta
+        if score > alpha:
+            alpha = score
+    return alpha
+
+
+
+
 transposition_table = {}
+
 def negamax(board, depth, alpha, beta, color):
-    # Generate a unique key for the current board position
     board_key = generate_board_key(board)
 
     if board_key in transposition_table:
         return transposition_table[board_key]
 
     if depth == 0:
-        eval = color * evaluate_board(board)
-        transposition_table[board_key] = eval
-        return eval
+        return quiescence_search(board, alpha, beta, color)
 
     max_value = -math.inf
     moves = get_all_moves(board, color)
@@ -438,6 +489,7 @@ def negamax(board, depth, alpha, beta, color):
 
     transposition_table[board_key] = max_value
     return max_value
+
 def generate_board_key(board):
     key = 0
     for i, piece in enumerate(board.squares):
@@ -477,24 +529,35 @@ def apply_move(board, move):
     # Switch turn
     board.turn = Piece.Dark if board.turn == Piece.Light else Piece.Light
 
-def choose_best_move(board, depth):
+def choose_best_move(board, max_depth, time_limit=5.0):
     best_move = None
     best_value = -math.inf
-    alpha = -math.inf
-    beta = math.inf
-    color = Piece.Dark  # AI plays as Dark
-
-    moves = get_all_moves(board, color)
-    for move in moves:
-        new_board = copy.deepcopy(board)
-        apply_move(new_board, move)
-        value = -negamax(new_board, depth - 1, -beta, -alpha, -color)
-        if value > best_value:
-            best_value = value
-            best_move = move
-        alpha = max(alpha, value)
-        if alpha >= beta:
+    start_time = time.time()
+    
+    for depth in range(1, max_depth + 1):
+        current_best_move = None
+        current_best_value = -math.inf
+        alpha = -math.inf
+        beta = math.inf
+        
+        moves = get_all_moves(board, Piece.Dark)
+        for move in moves:
+            if time.time() - start_time > time_limit:
+                break
+            new_board = copy.deepcopy(board)
+            apply_move(new_board, move)
+            value = -negamax(new_board, depth - 1, -beta, -alpha, -Piece.Dark)
+            if value > current_best_value:
+                current_best_value = value
+                current_best_move = move
+            alpha = max(alpha, value)
+            if alpha >= beta:
+                break
+        if time.time() - start_time > time_limit:
             break
+        if current_best_move:
+            best_move = current_best_move
+            best_value = current_best_value
     return best_move
 
 def create_board():
@@ -509,6 +572,9 @@ def create_board():
             )
 
 # ... existing imports and class definitions ...
+def ai_move_thread(board, depth, time_limit, callback):
+    move = choose_best_move(board, depth, time_limit)
+    callback(move)
 
 def main():
     precomputed_move_data()
@@ -517,7 +583,34 @@ def main():
     load_position_from_fen(STARTING_FEN, board)
     dragging_info = {"index": None, "piece": None}
     ai_thinking = False  # Flag to indicate AI is processing a move
-    
+
+    # Define the callback function inside main
+    def ai_callback(move):
+        nonlocal ai_thinking, board
+        if move:
+            apply_move(board, move)
+            # Check for checkmate after AI move
+            opponent = board.turn
+            has_legal_moves = False
+            for i in range(64):
+                if board.squares[i] and (board.squares[i] & opponent):
+                    legal_moves = get_legal_moves(board, i)
+                    if legal_moves:
+                        has_legal_moves = True
+                        break
+            if not has_legal_moves:
+                # Find opponent's king position
+                king_position = None
+                for i in range(64):
+                    piece = board.squares[i]
+                    if piece and (piece & opponent) and (piece & ~Piece.Light & ~Piece.Dark) == Piece.King:
+                        king_position = i
+                        break
+                if king_position and is_square_attacked(board, king_position, Piece.Dark if opponent == Piece.Light else Piece.Light):
+                    winner = "White" if opponent == Piece.Dark else "Black"
+                    show_victory_popup(winner)
+        ai_thinking = False
+
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -556,7 +649,6 @@ def main():
                     }[piece & ~Piece.Light & ~Piece.Dark], None)
                     board.squares[index] = None
 
-            # **Updated Conditional Below**
             elif event.type == pygame.MOUSEBUTTONUP and not ai_thinking and board.turn == Piece.Light:
                 if dragging_info["piece"]:
                     mx, my = pygame.mouse.get_pos()
@@ -612,58 +704,19 @@ def main():
                             if king_position and is_square_attacked(board, king_position, Piece.Dark if opponent == Piece.Light else Piece.Light):
                                 winner = "White" if opponent == Piece.Dark else "Black"
                                 show_victory_popup(winner)
-                    else:
-                        board.squares[board.selected] = {
-                            "Light_King": Piece.King | Piece.Light,
-                            "Light_Queen": Piece.Queen | Piece.Light,
-                            "Light_Rook": Piece.Rook | Piece.Light,
-                            "Light_Bishop": Piece.Bishop | Piece.Light,
-                            "Light_Knight": Piece.Knight | Piece.Light,
-                            "Light_Pawn": Piece.Pawn | Piece.Light,
-                            "Dark_King": Piece.King | Piece.Dark,
-                            "Dark_Queen": Piece.Queen | Piece.Dark,
-                            "Dark_Rook": Piece.Rook | Piece.Dark,
-                            "Dark_Bishop": Piece.Bishop | Piece.Dark,
-                            "Dark_Knight": Piece.Knight | Piece.Dark,
-                            "Dark_Pawn": Piece.Pawn | Piece.Dark,
-                        }.get(dragging_info["piece"], None)
                     dragging_info["index"] = None
                     dragging_info["piece"] = None
-                    board.selected = None
-                    board.legal_moves = []
-        
+
         # AI Move Execution
         if board.turn == Piece.Dark and not ai_thinking:
             ai_thinking = True
             pygame.display.set_caption("AI is thinking...")
             pygame.display.flip()
-            
-            # Choose AI move
-            ai_move = choose_best_move(board, depth=4)  # Adjust depth as needed
-            if ai_move:
-                apply_move(board, ai_move)
-                # Check for checkmate after AI move
-                opponent = board.turn
-                has_legal_moves = False
-                for i in range(64):
-                    if board.squares[i] and (board.squares[i] & opponent):
-                        legal_moves = get_legal_moves(board, i)
-                        if legal_moves:
-                            has_legal_moves = True
-                            break
-                if not has_legal_moves:
-                    # Find opponent's king position
-                    king_position = None
-                    for i in range(64):
-                        piece = board.squares[i]
-                        if piece and (piece & opponent) and (piece & ~Piece.Light & ~Piece.Dark) == Piece.King:
-                            king_position = i
-                            break
-                    if king_position and is_square_attacked(board, king_position, Piece.Dark if opponent == Piece.Light else Piece.Light):
-                        winner = "White" if opponent == Piece.Dark else "Black"
-                        show_victory_popup(winner)
-            ai_thinking = False
-            
+
+            # Start AI move in a separate thread
+            thread = threading.Thread(target=ai_move_thread, args=(board, 4, 5.0, ai_callback))
+            thread.start()
+
         create_board()
         board.highlight_squares()
         board.draw_pieces(dragging_info)
