@@ -34,6 +34,34 @@ def show_victory_popup(winner):
     pygame.quit()
     exit()
 
+def show_promotion_popup(color):
+    overlay = pygame.Surface((WIDTH, HEIGHT))
+    overlay.set_alpha(180)
+    overlay.fill((0, 0, 0))
+    screen.blit(overlay, (0, 0))
+
+    font = pygame.font.SysFont("Arial", 36, bold=True)
+    options = ["Queen", "Rook", "Bishop", "Knight"]
+    option_rects = []
+    for i, option in enumerate(options):
+        text = font.render(option, True, (255, 215, 0))
+        rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 50 + i * 50))
+        screen.blit(text, rect)
+        option_rects.append(rect)
+    
+    pygame.display.flip()
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                mx, my = pygame.mouse.get_pos()
+                for i, rect in enumerate(option_rects):
+                    if rect.collidepoint(mx, my):
+                        return options[i]
+
 def precomputed_move_data():
     for file in range (8):
         for rank in range(8):
@@ -260,9 +288,6 @@ def get_legal_moves(board, index, check_check=True):
         return valid_moves
     return moves
 
-
-
-
 def create_board():
     for rank in range(7, -1, -1):
         for file in range(8):
@@ -274,8 +299,6 @@ def create_board():
                 pygame.Rect(file*SQUARE_WIDTH, (7-rank)*SQUARE_HEIGHT, SQUARE_WIDTH, SQUARE_HEIGHT)
             )
 
-
-# Modify the main function to check for checkmate after a move is made
 def main():
     precomputed_move_data()
     running = True
@@ -328,7 +351,7 @@ def main():
                     rank = 7 - (my // SQUARE_HEIGHT)
                     new_index = rank*8 + file
                     if new_index in board.legal_moves:
-                        board.squares[new_index] = {
+                        piece_type = {
                             "Light_King": Piece.King | Piece.Light,
                             "Light_Queen": Piece.Queen | Piece.Light,
                             "Light_Rook": Piece.Rook | Piece.Light,
@@ -342,8 +365,21 @@ def main():
                             "Dark_Knight": Piece.Knight | Piece.Dark,
                             "Dark_Pawn": Piece.Pawn | Piece.Dark,
                         }.get(dragging_info["piece"], None)
+                        if (piece_type & ~Piece.Light & ~Piece.Dark) == Piece.Pawn and (
+                            (piece_type & Piece.Light and new_index // 8 == 7) or
+                            (piece_type & Piece.Dark and new_index // 8 == 0)
+                        ):
+                            promotion_choice = show_promotion_popup("Light" if piece_type & Piece.Light else "Dark")
+                            piece_type = {
+                                "Queen": Piece.Queen,
+                                "Rook": Piece.Rook,
+                                "Bishop": Piece.Bishop,
+                                "Knight": Piece.Knight,
+                            }[promotion_choice] | (Piece.Light if piece_type & Piece.Light else Piece.Dark)
+                        board.squares[new_index] = piece_type
                         board.turn = Piece.Dark if board.turn == Piece.Light else Piece.Light
-                        
+
+
                         # Check for checkmate
                         opponent = board.turn
                         has_legal_moves = False
