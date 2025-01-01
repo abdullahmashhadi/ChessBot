@@ -4,7 +4,13 @@ import math
 import copy
 import time
 import threading
+import queue
 
+# Initialize a queue for AI moves
+ai_move_queue = queue.Queue()
+
+AI_COLOR_LIGHT = 1
+AI_COLOR_DARK = -1
 STARTING_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
 pygame.init()
 WIDTH, HEIGHT = 800, 800
@@ -100,7 +106,7 @@ class Piece():
 class Board():
     def __init__(self):
         self.squares = [None]*64
-        self.turn = Piece.Light
+        self.turn = Piece.Light  # Use +1 for Light, -1 for Dark
         self.selected = None
         self.legal_moves = []
         self.castling_rights = {'K': True, 'Q': True, 'k': True, 'q': True}
@@ -137,6 +143,15 @@ class Board():
             rank = move // 8
             file = move % 8
             pygame.draw.rect(screen, HIGHLIGHT_COLOR, pygame.Rect(file*SQUARE_WIDTH, (7 - rank)*SQUARE_HEIGHT, SQUARE_WIDTH, SQUARE_HEIGHT), 4)
+    def clone(self):
+        new_board = Board()
+        new_board.squares = self.squares.copy()
+        new_board.turn = self.turn
+        new_board.selected = self.selected
+        new_board.legal_moves = self.legal_moves.copy()
+        new_board.castling_rights = self.castling_rights.copy()
+        new_board.en_passant_target = self.en_passant_target
+        return new_board
 
 def load_piece_images():
     pieces = {}
@@ -379,7 +394,8 @@ def evaluate_board(board):
             piece_type = piece & ~Piece.Light & ~Piece.Dark
             piece_position = piece_square_tables.get(piece_type, [0]*64)[index]
             color = "Light" if piece & Piece.Light else "Dark"
-            score += (piece_values.get(piece_type, 0) + piece_position) if color == "Light" else -(piece_values.get(piece_type, 0) + piece_position)
+            multiplier = AI_COLOR_LIGHT if color == "Light" else AI_COLOR_DARK
+            score += multiplier * (piece_values.get(piece_type, 0) + piece_position)
             
             if piece_type == Piece.Pawn:
                 pawn_structure[color] += 1
@@ -389,11 +405,20 @@ def evaluate_board(board):
                     if other_index != index and board.squares[other_index] == piece:
                         doubled_pawns[color] += 1
                 # Check for isolated pawns
-                if not any(board.squares[i] and (board.squares[i] & Piece.Pawn) and ((i % 8) in [file-1, file+1]) for i in range(64)):
+                if not any(
+                    board.squares[i] and (board.squares[i] & Piece.Pawn) and ((i % 8) in [file-1, file+1])
+                    for i in range(64)
+                ):
                     isolated_pawns[color] += 1
                 # Check for connected pawns
-                if any(board.squares[i] and (board.squares[i] & Piece.Pawn) and (i % 8) == file -1 for i in range(64)) or \
-                   any(board.squares[i] and (board.squares[i] & Piece.Pawn) and (i % 8) == file +1 for i in range(64)):
+                if any(
+                    board.squares[i] and (board.squares[i] & Piece.Pawn) and (i % 8) == file -1
+                    for i in range(64)
+                ) or \
+                   any(
+                       board.squares[i] and (board.squares[i] & Piece.Pawn) and (i % 8) == file +1
+                       for i in range(64)
+                   ):
                     connected_pawns[color] += 1
 
     # Apply heuristics
@@ -401,38 +426,61 @@ def evaluate_board(board):
     score -= (connected_pawns['Dark'] - isolated_pawns['Dark'] - doubled_pawns['Dark']) * 0.5
 
     # Mobility
-    light_moves = sum(len(get_legal_moves(board, i)) for i in range(64) if board.squares[i] and (board.squares[i] & Piece.Light))
-    dark_moves = sum(len(get_legal_moves(board, i)) for i in range(64) if board.squares[i] and (board.squares[i] & Piece.Dark))
+    light_moves = sum(
+        len(get_legal_moves(board, i)) 
+        for i in range(64) 
+        if board.squares[i] and (board.squares[i] & Piece.Light)
+    )
+    dark_moves = sum(
+        len(get_legal_moves(board, i)) 
+        for i in range(64) 
+        if board.squares[i] and (board.squares[i] & Piece.Dark)
+    )
     score += (light_moves - dark_moves) * 0.1  # Mobility weight
 
-    # King safety remains the same
-    light_king = next((i for i, p in enumerate(board.squares) if p == (Piece.King | Piece.Light)), None)
-    dark_king = next((i for i, p in enumerate(board.squares) if p == (Piece.King | Piece.Dark)), None)
+# King safety remains the same
+    light_king = next(
+        (i for i, p in enumerate(board.squares) if p == (Piece.King | Piece.Light)), None
+    )
+    dark_king = next(
+        (i for i, p in enumerate(board.squares) if p == (Piece.King | Piece.Dark)), None
+    )
     if light_king is not None:
         surrounding = get_surrounding_squares(light_king)
-        defended = sum(1 for sq in surrounding if board.squares[sq] and (board.squares[sq] & Piece.Light))
+        defended = sum(
+            1 for sq in surrounding 
+            if board.squares[sq] and (board.squares[sq] & Piece.Light)
+        )
         score -= (8 - defended) * 0.5  # Less defended kings are worse
     if dark_king is not None:
         surrounding = get_surrounding_squares(dark_king)
-        defended = sum(1 for sq in surrounding if board.squares[sq] and (board.squares[sq] & Piece.Dark))
+        defended = sum(
+            1 for sq in surrounding 
+            if board.squares[sq] and (board.squares[sq] & Piece.Dark)
+        )
         score += (8 - defended) * 0.5  # Less defended kings are worse
-
 
     return score
 
+precomputed_surrounding = {}
+
+def precompute_surrounding_squares():
+    for index in range(64):
+        surrounding = []
+        rank = index // 8
+        file = index % 8
+        for dr in [-1, 0, 1]:
+            for df in [-1, 0, 1]:
+                if dr == 0 and df == 0:
+                    continue
+                new_rank = rank + dr
+                new_file = file + df
+                if 0 <= new_rank < 8 and 0 <= new_file < 8:
+                    surrounding.append(new_rank * 8 + new_file)
+        precomputed_surrounding[index] = surrounding
+
 def get_surrounding_squares(index):
-    surrounding = []
-    rank = index // 8
-    file = index % 8
-    for dr in [-1, 0, 1]:
-        for df in [-1, 0, 1]:
-            if dr == 0 and df == 0:
-                continue
-            new_rank = rank + dr
-            new_file = file + df
-            if 0 <= new_rank < 8 and 0 <= new_file < 8:
-                surrounding.append(new_rank * 8 + new_file)
-    return surrounding
+    return precomputed_surrounding.get(index, [])
 
 
 def quiescence_search(board, alpha, beta, color):
@@ -445,14 +493,14 @@ def quiescence_search(board, alpha, beta, color):
     capture_moves = []
     for index in range(64):
         piece = board.squares[index]
-        if piece and (piece & color):
+        if piece and ((color == AI_COLOR_LIGHT and (piece & Piece.Light)) or (color == AI_COLOR_DARK and (piece & Piece.Dark))):
             legal_moves = get_legal_moves(board, index, check_check=False)
             for move in legal_moves:
                 if board.squares[move] is not None:
                     capture_moves.append((index, move))
-    
+
     for move in capture_moves:
-        new_board = copy.deepcopy(board)
+        new_board = board.clone()
         apply_move(new_board, move)
         score = -quiescence_search(new_board, -beta, -alpha, -color)
         if score >= beta:
@@ -468,27 +516,46 @@ transposition_table = {}
 
 def negamax(board, depth, alpha, beta, color):
     board_key = generate_board_key(board)
+    table_key = (board_key, depth)  # Incorporate depth into the key
 
-    if board_key in transposition_table:
-        return transposition_table[board_key]
+    if table_key in transposition_table:
+        return transposition_table[table_key]
 
     if depth == 0:
-        return quiescence_search(board, alpha, beta, color)
+        return color * evaluate_board(board)
+
+    moves = get_all_moves(board, board.turn)
+    if not moves:
+        # Check for checkmate or stalemate
+        if is_square_attacked(board, find_king(board, board.turn), -color):
+            return color * math.inf  # Checkmate
+        else:
+            return 0  # Stalemate
 
     max_value = -math.inf
-    moves = get_all_moves(board, color)
     for move in moves:
-        new_board = copy.deepcopy(board)
+        new_board = board.clone()
         apply_move(new_board, move)
-        value = -negamax(new_board, depth - 1, -beta, -alpha, -color)
+        child_color = -color
+        value = -negamax(new_board, depth - 1, -beta, -alpha, child_color)
         if value > max_value:
             max_value = value
         alpha = max(alpha, value)
         if alpha >= beta:
             break
-
-    transposition_table[board_key] = max_value
+        # Limit transposition table size
+    if len(transposition_table) > 1000000:
+        transposition_table.clear()
+    transposition_table[table_key] = max_value
     return max_value
+
+
+def find_king(board, color):
+    target = Piece.King | (Piece.Light if color == Piece.Light else Piece.Dark)
+    for i, piece in enumerate(board.squares):
+        if piece == target:
+            return i
+    return None
 
 def generate_board_key(board):
     key = 0
@@ -498,17 +565,39 @@ def generate_board_key(board):
     key ^= hash(board.turn)
     return key
 
+def get_move_priority(board, move):
+    from_index, to_index = move
+    target_piece = board.squares[to_index]
+    if target_piece:
+        victim_value = get_piece_value(target_piece)
+        aggressor_value = get_piece_value(board.squares[from_index])
+        return victim_value - aggressor_value
+    return 0
+
+def get_piece_value(piece):
+    values = {
+        Piece.Pawn: 1,
+        Piece.Knight: 3,
+        Piece.Bishop: 3,
+        Piece.Rook: 5,
+        Piece.Queen: 9,
+        Piece.King: 1000,
+    }
+    piece_type = piece & ~Piece.Light & ~Piece.Dark
+    return values.get(piece_type, 0)
+
+
 def get_all_moves(board, color):
     all_moves = []
     for index in range(64):
         piece = board.squares[index]
-        if piece and (piece & color):
+        if piece and ((color == Piece.Light and (piece & Piece.Light)) or (color == Piece.Dark and (piece & Piece.Dark))):
             legal_moves = get_legal_moves(board, index)
             for move in legal_moves:
                 capture = board.squares[move] is not None
                 all_moves.append((index, move, capture))
-    # Order moves: captures first, then others
-    all_moves.sort(key=lambda x: x[2], reverse=True)  # Captures before non-captures
+    # Assign priority based on MVV/LVA
+    all_moves.sort(key=lambda x: get_move_priority(board, (x[0], x[1])), reverse=True)
     return [(move[0], move[1]) for move in all_moves]
 
 def apply_move(board, move):
@@ -529,24 +618,34 @@ def apply_move(board, move):
     # Switch turn
     board.turn = Piece.Dark if board.turn == Piece.Light else Piece.Light
 
-def choose_best_move(board, max_depth, time_limit=5.0):
+def choose_best_move(board, max_depth, time_limit):
     best_move = None
     best_value = -math.inf
     start_time = time.time()
     
+    # Map board.turn to AI color
+    if board.turn == Piece.Dark:
+        ai_color = AI_COLOR_DARK
+    elif board.turn == Piece.Light:
+        ai_color = AI_COLOR_LIGHT
+    else:
+        ai_color = AI_COLOR_LIGHT  # Default to Light if undefined
+
     for depth in range(1, max_depth + 1):
         current_best_move = None
         current_best_value = -math.inf
         alpha = -math.inf
         beta = math.inf
-        
-        moves = get_all_moves(board, Piece.Dark)
+
+        moves = get_all_moves(board, board.turn)
+        print(f"Searching Depth: {depth}")
         for move in moves:
             if time.time() - start_time > time_limit:
+                print("Time limit reached.")
                 break
-            new_board = copy.deepcopy(board)
+            new_board = board.clone()
             apply_move(new_board, move)
-            value = -negamax(new_board, depth - 1, -beta, -alpha, -Piece.Dark)
+            value = -negamax(new_board, depth - 1, -beta, -alpha, -ai_color)
             if value > current_best_value:
                 current_best_value = value
                 current_best_move = move
@@ -558,6 +657,7 @@ def choose_best_move(board, max_depth, time_limit=5.0):
         if current_best_move:
             best_move = current_best_move
             best_value = current_best_value
+        print(f"Depth {depth}: Best Move Value = {best_value}")
     return best_move
 
 def create_board():
@@ -571,10 +671,9 @@ def create_board():
                 pygame.Rect(file*SQUARE_WIDTH, (7-rank)*SQUARE_HEIGHT, SQUARE_WIDTH, SQUARE_HEIGHT)
             )
 
-# ... existing imports and class definitions ...
 def ai_move_thread(board, depth, time_limit, callback):
     move = choose_best_move(board, depth, time_limit)
-    callback(move)
+    ai_move_queue.put(move)  # Put the move in the queue instead of direct callback
 
 def main():
     precomputed_move_data()
@@ -586,32 +685,56 @@ def main():
 
     # Define the callback function inside main
     def ai_callback(move):
-        nonlocal ai_thinking, board
-        if move:
-            apply_move(board, move)
-            # Check for checkmate after AI move
-            opponent = board.turn
-            has_legal_moves = False
-            for i in range(64):
-                if board.squares[i] and (board.squares[i] & opponent):
-                    legal_moves = get_legal_moves(board, i)
-                    if legal_moves:
-                        has_legal_moves = True
-                        break
-            if not has_legal_moves:
-                # Find opponent's king position
-                king_position = None
-                for i in range(64):
-                    piece = board.squares[i]
-                    if piece and (piece & opponent) and (piece & ~Piece.Light & ~Piece.Dark) == Piece.King:
-                        king_position = i
-                        break
-                if king_position and is_square_attacked(board, king_position, Piece.Dark if opponent == Piece.Light else Piece.Light):
-                    winner = "White" if opponent == Piece.Dark else "Black"
-                    show_victory_popup(winner)
-        ai_thinking = False
+        pass
+        # nonlocal ai_thinking, board
+        # if move:
+        #     apply_move(board, move)
+        #     # Check for checkmate after AI move
+        #     opponent = board.turn
+        #     has_legal_moves = False
+        #     for i in range(64):
+        #         if board.squares[i] and (board.squares[i] & opponent):
+        #             legal_moves = get_legal_moves(board, i)
+        #             if legal_moves:
+        #                 has_legal_moves = True
+        #                 break
+        #     if not has_legal_moves:
+        #         # Find opponent's king position
+        #         king_position = None
+        #         for i in range(64):
+        #             piece = board.squares[i]
+        #             if piece and (piece & opponent) and (piece & ~Piece.Light & ~Piece.Dark) == Piece.King:
+        #                 king_position = i
+        #                 break
+        #         if king_position and is_square_attacked(board, king_position, Piece.Dark if opponent == Piece.Light else Piece.Light):
+        #             winner = "White" if opponent == Piece.Dark else "Black"
+        #             show_victory_popup(winner)
+        # ai_thinking = False
 
     while running:
+        # Handle AI moves from the queue
+        try:
+            move = ai_move_queue.get_nowait()
+            if move:
+                apply_move(board, move)
+                # Check for checkmate after AI move
+                opponent = board.turn
+                has_legal_moves = False
+                for i in range(64):
+                    if board.squares[i] and (board.squares[i] & opponent):
+                        legal_moves = get_legal_moves(board, i)
+                        if legal_moves:
+                            has_legal_moves = True
+                            break
+                if not has_legal_moves:
+                    king_position = find_king(board, opponent)
+                    if king_position and is_square_attacked(board, king_position, -opponent):
+                        winner = "White" if opponent == Piece.Dark else "Black"
+                        show_victory_popup(winner)
+                ai_thinking = False
+        except queue.Empty:
+            pass
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -682,6 +805,7 @@ def main():
                                 "Knight": Piece.Knight,
                             }[promotion_choice] | (Piece.Light if piece_type & Piece.Light else Piece.Dark)
                         board.squares[new_index] = piece_type
+                        # Switch turn using bitmask values
                         board.turn = Piece.Dark if board.turn == Piece.Light else Piece.Light
 
                         # Check for checkmate
@@ -704,8 +828,25 @@ def main():
                             if king_position and is_square_attacked(board, king_position, Piece.Dark if opponent == Piece.Light else Piece.Light):
                                 winner = "White" if opponent == Piece.Dark else "Black"
                                 show_victory_popup(winner)
-                    dragging_info["index"] = None
-                    dragging_info["piece"] = None
+                    else:
+                        # Restore the piece to its original square since the move is invalid
+                        piece_type = {
+                            "Light_King": Piece.King | Piece.Light,
+                            "Light_Queen": Piece.Queen | Piece.Light,
+                            "Light_Rook": Piece.Rook | Piece.Light,
+                            "Light_Bishop": Piece.Bishop | Piece.Light,
+                            "Light_Knight": Piece.Knight | Piece.Light,
+                            "Light_Pawn": Piece.Pawn | Piece.Light,
+                            "Dark_King": Piece.King | Piece.Dark,
+                            "Dark_Queen": Piece.Queen | Piece.Dark,
+                            "Dark_Rook": Piece.Rook | Piece.Dark,
+                            "Dark_Bishop": Piece.Bishop | Piece.Dark,
+                            "Dark_Knight": Piece.Knight | Piece.Dark,
+                            "Dark_Pawn": Piece.Pawn | Piece.Dark,
+                        }.get(dragging_info["piece"], None)
+                        board.squares[dragging_info["index"]] = piece_type
+                dragging_info["index"] = None
+                dragging_info["piece"] = None
 
         # AI Move Execution
         if board.turn == Piece.Dark and not ai_thinking:
@@ -714,7 +855,7 @@ def main():
             pygame.display.flip()
 
             # Start AI move in a separate thread
-            thread = threading.Thread(target=ai_move_thread, args=(board, 4, 5.0, ai_callback))
+            thread = threading.Thread(target=ai_move_thread, args=(board, 4, 10.0, ai_callback))
             thread.start()
 
         create_board()
@@ -725,4 +866,7 @@ def main():
 
     pygame.quit()
 
+
+precomputed_move_data()
+precompute_surrounding_squares()
 main()
